@@ -1,0 +1,7 @@
+resource/
+data/
+saved_model/
+.venv*/
+.vscode/
+.idea/
+__pycache__/
