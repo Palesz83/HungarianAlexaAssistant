@@ -33,7 +33,7 @@ python.exe assistant.py<br>
 - After you can say 
   - "Alexa, mennyi a pontos idő?"
   - "Alexa, állíts időzítőt 5 percre"
-  - "Alexa, Állítsd le az időzítőt"
+  - "Alexa, időzítőt stop"
   - "Alexa, Kezdjük a játékot"
     
 
