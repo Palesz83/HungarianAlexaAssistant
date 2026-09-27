@@ -1,3 +1,4 @@
+[English](README.md) | [Magyar](README.hu.md)
 # HungarianAlexaAssistant
 
 Magyar nyelvű, helyben futó hangasszisztens ébresztőszó-felismeréssel, beszédfelismeréssel, helyi LLM-integrációval és szövegfelolvasással.
