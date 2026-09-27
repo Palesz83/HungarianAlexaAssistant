@@ -1,3 +1,4 @@
+[English](README.md) | [Magyar](README.hu.md)
 # HungarianAlexaAssistant
 
 Hungarian voice assistant with wake-word detection, speech recognition, LLM integration and text-to-speech.
