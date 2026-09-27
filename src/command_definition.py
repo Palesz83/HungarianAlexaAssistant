@@ -1,6 +1,5 @@
 import datetime
 import threading
-import time
 
 import sounddevice as sd
 import soundfile as sf
@@ -47,7 +46,7 @@ class CommandEngine:
         self.game_history = []
 
         # ============================================
-        # LOCK
+        # AUDIO LOCK
         # ============================================
 
         self.audio_lock = threading.Lock()
@@ -67,11 +66,12 @@ class CommandEngine:
 
             while not self.alarm_stop_event.is_set():
 
-                print("[ALARM] WAV lejátszás...")
+                print(
+                    "[ALARM] WAV lejátszás..."
+                )
 
-                # Fontos:
-                # nem használjuk az sd.default.samplerate
-                # globális értékét.
+                # A WAV saját mintavételi frekvenciáját használjuk.
+                # Nem módosítjuk az sd.default.samplerate értékét.
 
                 with self.audio_lock:
 
@@ -85,8 +85,8 @@ class CommandEngine:
                     "[ALARM] WAV lejátszás kész."
                 )
 
-                # 5 másodperc várakozás,
-                # de megszakítható legyen.
+                # 5 másodperc várakozás.
+                # Az Event miatt a várakozás megszakítható.
 
                 self.alarm_stop_event.wait(
                     timeout=5
@@ -116,7 +116,7 @@ class CommandEngine:
     def _start_alarm(self):
 
         # Ha már szól az alarm,
-        # ne indítsunk még egyet.
+        # ne indítsunk újabb alarm szálat.
 
         if self.alarm_active:
             return
@@ -201,7 +201,7 @@ class CommandEngine:
             )
 
         # --------------------------------------------
-        # Korábbi timer törlése
+        # Korábbi timerek törlése
         # --------------------------------------------
 
         for timer in self.running_timers:
@@ -247,34 +247,48 @@ class CommandEngine:
         )
 
     # ==================================================
-    # TIMER LEÁLLÍTÁS
+    # TIMER / ALARM LEÁLLÍTÁS
     # ==================================================
 
     def handle_stop_timer(self):
 
+        # --------------------------------------------
         # Alarm leállítása
+        # --------------------------------------------
+
         if self.alarm_active:
 
             self._stop_alarm()
 
             for timer in self.running_timers:
+
                 timer.cancel()
 
             self.running_timers.clear()
 
-            return "A csengőt leállítottam."
+            return (
+                "A csengőt leállítottam."
+            )
 
+        # --------------------------------------------
         # Timer leállítása
+        # --------------------------------------------
+
         if self.running_timers:
 
             for timer in self.running_timers:
+
                 timer.cancel()
 
             self.running_timers.clear()
 
-            return "Az időzítőt leállítottam."
+            return (
+                "Az időzítőt leállítottam."
+            )
 
-        return "Nincs futó időzítő."
+        return (
+            "Nincs futó időzítő."
+        )
 
     # ==================================================
     # PLAY
@@ -361,6 +375,29 @@ class CommandEngine:
         }
 
     # ==================================================
+    # WEB SEARCH
+    # ==================================================
+
+    def handle_web_search(
+        self,
+        response
+    ):
+
+        """
+        A web_search action tényleges végrehajtását
+        az ollama_interpreter.py végzi.
+
+        Ez a függvény csak akkor hasznos,
+        ha valamilyen más komponens közvetlenül
+        a CommandEngine-en keresztül szeretné kezelni.
+
+        Normál esetben ide nem jut el a web_search,
+        mert az ollama_interpreter.py már feldolgozza.
+        """
+
+        return response
+
+    # ==================================================
     # COMMAND PROCESSOR
     # ==================================================
 
@@ -381,6 +418,10 @@ class CommandEngine:
             command
         )
 
+        # ============================================
+        # TIMER
+        # ============================================
+
         if action == "set_timer":
 
             return self.handle_timer(
@@ -389,17 +430,46 @@ class CommandEngine:
                 )
             )
 
+        # ============================================
+        # TIMER STOP
+        # ============================================
+
         elif action == "stop_timer":
 
             return self.handle_stop_timer()
+
+        # ============================================
+        # PLAY
+        # ============================================
 
         elif action == "play":
 
             return self.handle_play()
 
+        # ============================================
+        # TIME
+        # ============================================
+
         elif action == "get_time":
 
             return self.handle_time()
+
+        # ============================================
+        # WEB SEARCH
+        # ============================================
+
+        elif action == "web_search":
+
+            return self.handle_web_search(
+                command.get(
+                    "response",
+                    ""
+                )
+            )
+
+        # ============================================
+        # GAME START
+        # ============================================
 
         elif action == "game_start":
 
@@ -415,6 +485,10 @@ class CommandEngine:
                 "response"
             )
 
+        # ============================================
+        # GAME END
+        # ============================================
+
         elif action == "game_end":
 
             response = command.get(
@@ -424,6 +498,16 @@ class CommandEngine:
             self.stop_game()
 
             return response
+
+        # ============================================
+        # CHAT
+        # ============================================
+
+        elif action == "chat":
+
+            return command.get(
+                "response"
+            )
 
         return None
 

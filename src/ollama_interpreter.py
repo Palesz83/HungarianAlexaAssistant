@@ -1,239 +1,256 @@
 import json
 import requests
 
+from wiki_search import (
+    get_wiki_answer
+)
+
+from weather import (
+    get_current_weather,
+    format_weather_response
+)
+
+# =========================================================
+# BEÁLLÍTÁSOK
+# =========================================================
 
 OLLAMA_URL = "http://localhost:11434/api/generate"
+
 OLLAMA_MODEL = "gemma3:4b"
+# OLLAMA_MODEL = "qwen2.5:1.5b"
 
+REQUEST_TIMEOUT = 240
 
-COMMAND_SYSTEM_PROMPT = """
-Te Aleksza vagy, egy magyar nyelvű lokális személyi asszisztens.
+# =========================================================
+# NORMÁL BESZÉLGETÉSI ELŐZMÉNY
+# =========================================================
 
-A bemenet egy Whisper beszédfelismerő rendszerből érkező magyar szöveg.
+conversation_history = []
 
-A feladatod:
+MAX_HISTORY_MESSAGES = 12
 
-1. Értsd meg a felhasználó szándékát.
-2. Válaszd ki a megfelelő action értéket.
-3. Ha szükséges, töltsd ki a hozzá tartozó adatokat.
-4. Chat esetén írd meg közvetlenül a választ a response mezőben.
-5. Játék esetén kezeld a játék beszélgetését a megadott játékállapot alapján.
+# =========================================================
+# ELSŐ LLM PROMPT
+# =========================================================
 
-A JSON-on kívül SEMMIT ne írj.
+SYSTEM_PROMPT = """
+You are the intent and action controller of a Hungarian voice assistant
+called Aleksza.
 
---------------------------------------------------
-POSSIBLE ACTIONS
---------------------------------------------------
+The user speaks Hungarian.
 
-set_timer
-stop_timer
-play
-get_time
-chat
-game_start
-game_turn
-game_end
+IMPORTANT:
+The speech recognition system may produce:
+- missing accents
+- spelling mistakes
+- wrong words
+- phonetic errors
+- incomplete sentences
 
---------------------------------------------------
-SET_TIMER
---------------------------------------------------
+You must infer the user's intended meaning from context.
 
-Ha a felhasználó időzítőt szeretne.
+Your job is to classify the user's request into exactly ONE action.
 
-Példák:
+Allowed actions:
 
-"állíts be tíz perces időzítőt"
+- chat
+- set_timer
+- stop_timer
+- play
+- get_time
+- wiki_search
+- weather
+- game_start
+- game_turn
+- game_end
 
-=> action: set_timer
-=> duration_minutes: 10
 
-"állíts be fél órás időzítőt"
+ACTION RULES
+------------
 
-=> duration_minutes: 30
+SPEECH INPUT SAFETY RULE:
+The user input comes from Whisper speech recognition.
+Whisper can make transcription mistakes, especially with names, numbers,
+commands, and similar-sounding words.
 
-"állíts be másfél órás időzítőt"
+IMPORTANT:
+Never guess an action when the user's intention is unclear.
 
-=> duration_minutes: 90
+Use the conversation context to understand small speech-recognition errors,
+but only when the intended meaning is obvious.
 
-"állíts be két órás időzítőt"
+If the input can reasonably mean two or more different things, do NOT choose
+an action based on guessing.
 
-=> duration_minutes: 120
+chat:
+Normal conversation, greetings, casual requests, opinions, explanations,
+or questions that do not require a special action.
 
-Minden időt percben adj vissza.
+Use chat for general knowledge questions when a Wikipedia search
+would not be useful or necessary.
 
---------------------------------------------------
-STOP_TIMER
---------------------------------------------------
+set_timer:
+The user wants to start or set a countdown timer.
 
-Példák:
+duration_minutes must contain the requested duration in whole minutes.
 
-"állítsd le az időzítőt"
+stop_timer:
+The user wants to stop or cancel the timer or alarm.
 
-"kapcsold ki az időzítőt"
+play:
+The user wants to start music or playback.
 
-"állítsd le"
+get_time:
+The user asks for the current time.
 
---------------------------------------------------
-PLAY
---------------------------------------------------
+wiki_search:
+Use this when the user asks for factual information about a person,
+place, historical event, scientific concept, animal, object, organization,
+or other topic that can reasonably be answered from a Wikipedia article.
 
-Példák:
+Examples:
+- "Ki volt Albert Einstein?"
+- "Mesélj Petőfi Sándorról."
+- "Mi az a fekete lyuk?"
+- "Mi volt a Római Birodalom?"
+- "Hol található a Balaton?"
+- "Mi az a fotoszintézis?"
+- "Ki volt Mátyás király?"
 
-"indítsd el"
+For wiki_search:
+response MUST contain a concise Wikipedia search query.
 
-"indítsd el a zenét"
+The query should contain the main subject of the request,
+not the entire user sentence.
 
-"játssz zenét"
+Examples:
 
---------------------------------------------------
-GET_TIME
---------------------------------------------------
+User:
+"Ki volt Albert Einstein?"
 
-Példák:
+Query:
+"Albert Einstein"
 
-"mennyi az idő?"
+User:
+"Mesélj a Római Birodalomról."
 
-"hány óra van?"
+Query:
+"Római Birodalom"
 
-"most mennyi az idő?"
+User:
+"Mi az a fotoszintézis?"
 
---------------------------------------------------
-CHAT
---------------------------------------------------
+Query:
+"Fotoszintézis"
 
-Ha a felhasználó nem akar speciális műveletet,
-hanem egyszerűen beszélgetni szeretne veled,
-az action legyen:
+Do not include phrases such as:
+"keress rá"
+"wikipédia"
+"mi az"
+"mesélj"
+"ki volt"
 
-chat
+Only return the subject to search for.
 
-Ebben az esetben a response mezőbe írd a természetes magyar választ.
-Legalább három szavas mondatokban válaszolj.
+weather:
+Use this for weather-related requests.
 
-Példa:
+Examples:
+- "Milyen idő van Budapesten?"
+- "Hány fok van Érden?"
+- "Esik most?"
+- "Milyen idő van Győrben?"
+- "Mi az időjárás Budapesten?"
 
-chat_request:"Mi magyarország fővárosa?"
-respons=>"Magyarország fővárosa budapest"
+For weather:
+location MUST contain the requested location.
 
-chat_request:"Mennyi egy töketlen fecske végsebessége?"
-respons=>"Attól függ, európai vagy afrikai fecske"
+IMPORTANT:
+Do NOT use wiki_search for normal weather requests.
+Do NOT use web search for weather.
 
-Felhasználó:
-"Hogy vagy?"
+If the user clearly names a Hungarian city, use its normal
+Hungarian name.
 
-JSON:
+Examples:
+"Érd"
+"Budapest"
+"Győr"
+"Szeged"
 
-{
-    "action": "chat",
-    "duration_minutes": null,
-    "game": null,
-    "response": "Jól vagyok, köszönöm! Miben segíthetek?",
-    "game_data": null
-}
+Do not translate Hungarian city names into another language.
 
---------------------------------------------------
-GAME
---------------------------------------------------
+If the user asks about weather but does not specify a location,
+use location = null.
 
-Támogatott játék:
+game_start:
+The user wants to start a game.
 
-animal_guess
+game:
+Contain the game name.
 
-Ez egy olyan játék, amelyben a FELHASZNÁLÓ gondol egy állatra,
-Aleksza pedig igen/nem kérdéseket tesz fel.
+game_turn:
+The user is making a move or continuing an active game.
 
-Ha a felhasználó játékot akar indítani:
+game_end:
+The user wants to stop or end the current game.
 
-action = game_start
 
-game = animal_guess
+RESPONSE RULE
+------------
 
-response = egy rövid magyar mondat,
-amely arra kéri a felhasználót,
-hogy gondoljon egy állatra.
+For chat:
+response must contain the natural Hungarian response.
 
-Példa:
+For set_timer, stop_timer, play and get_time:
+response may contain a short Hungarian response.
 
-{
-    "action": "game_start",
-    "duration_minutes": null,
-    "game": "animal_guess",
-    "response": "Gondolj egy állatra, de ne áruld el! Ha megvan, kezdjük.",
-    "game_data": null
-}
+For wiki_search:
+response MUST contain ONLY the concise search query.
 
-A játék közben:
+The Python application will perform the Wikipedia search
+and generate the final spoken answer.
 
-action = game_turn
+Do not generate a Wikipedia answer yourself.
 
-A response legyen a KÖVETKEZŐ kérdés.
+For weather:
+location MUST contain the location.
+response can be empty or contain a short acknowledgement.
 
-A kérdés lehetőleg igen/nem kérdés legyen.
+The Python application will retrieve the weather data
+and generate the final spoken answer.
 
-Példák:
+Do not generate weather information yourself.
 
-"Az állatod emlős?"
+For game actions:
+response should contain the natural Hungarian response.
 
-"Az állatod tud repülni?"
-
-"Az állatod nagyobb egy macskánál?"
-
-"Az állatod vízben él?"
-
-A kérdések legyenek változatosak és segítsék az állat leszűkítését.
-
-A game_data mezőbe röviden írd le,
-hogy milyen információt próbálsz megtudni.
-
-Ha úgy gondolod, hogy már elég információd van
-az állat kitalálásához,
-használj game_end actiont.
-
-Példa:
-
-{
-    "action": "game_end",
-    "duration_minutes": null,
-    "game": "animal_guess",
-    "response": "Arra gondoltál, hogy egy delfin?",
-    "game_data": {
-        "guess": "delfin"
-    }
-}
-
---------------------------------------------------
-FONTOS
---------------------------------------------------
-
-A bemenet magyar.
-
-A JSON mezőnevek és action értékek angolul legyenek.
-
-A felhasználó beszédfelismerésből érkező szöveget ad,
-ezért kisebb Whisper hibákat javíts ki fejben. 
-
-
-Mindig csak érvényes JSON-t adj vissza.
-
-Ne használj Markdownot.
-
-Ne írj magyarázatot JSON-on kívül.
+Always return valid JSON matching the supplied schema.
+Do not output markdown.
+Do not output explanations outside JSON.
 """
 
+# =========================================================
+# ELSŐ LLM SCHEMA
+# =========================================================
 
-COMMAND_SCHEMA = {
+ACTION_SCHEMA = {
+
     "type": "object",
 
     "properties": {
 
         "action": {
             "type": "string",
+
             "enum": [
+                "chat",
                 "set_timer",
                 "stop_timer",
                 "play",
                 "get_time",
-                "chat",
+                "wiki_search",
+                "weather",
                 "game_start",
                 "game_turn",
                 "game_end"
@@ -248,6 +265,13 @@ COMMAND_SCHEMA = {
         },
 
         "game": {
+            "type": [
+                "string",
+                "null"
+            ]
+        },
+
+        "location": {
             "type": [
                 "string",
                 "null"
@@ -273,6 +297,7 @@ COMMAND_SCHEMA = {
         "action",
         "duration_minutes",
         "game",
+        "location",
         "response",
         "game_data"
     ],
@@ -281,104 +306,29 @@ COMMAND_SCHEMA = {
 }
 
 
-def interpret(user_text, conversation_history=None, game_context=None):
-    """
-    Egyetlen Ollama hívás.
+# =========================================================
+# OLLAMA HÍVÁS
+# =========================================================
 
-    user_text:
-        Az aktuális Whisper szöveg.
-
-    conversation_history:
-        Normál beszélgetés előzménye.
-
-    game_context:
-        Aktív játék állapota és előzménye.
-    """
-
-    if not user_text:
-        return None
-
-    conversation_history = conversation_history or []
-
-    game_context = game_context or {
-        "active": False,
-        "game": None,
-        "history": []
-    }
-
-    # ---------------------------------------------------------
-    # KONVERZÁCIÓS KONTEXTUS
-    # ---------------------------------------------------------
-
-    context_text = ""
-
-    if conversation_history:
-        context_text += "\n\nNORMÁL BESZÉLGETÉS ELŐZMÉNYEI:\n"
-
-        for message in conversation_history:
-            role = message["role"]
-            content = message["content"]
-
-            if role == "user":
-                context_text += f"Felhasználó: {content}\n"
-
-            elif role == "assistant":
-                context_text += f"Aleksza: {content}\n"
-
-    # ---------------------------------------------------------
-    # JÁTÉK KONTEXTUS
-    # ---------------------------------------------------------
-
-    if game_context.get("active"):
-
-        context_text += "\n\nAKTÍV JÁTÉK:\n"
-
-        context_text += (
-            f"Játék: {game_context.get('game')}\n"
-        )
-
-        context_text += "\nJÁTÉK ELŐZMÉNYEI:\n"
-
-        for message in game_context.get("history", []):
-
-            role = message["role"]
-            content = message["content"]
-
-            if role == "user":
-                context_text += f"Felhasználó: {content}\n"
-
-            elif role == "assistant":
-                context_text += f"Aleksza: {content}\n"
-
-    # ---------------------------------------------------------
-    # AKTUÁLIS INPUT
-    # ---------------------------------------------------------
-
-    prompt = (
-        context_text
-        + "\n\nAKTUÁLIS FELHASZNÁLÓI ÜZENET:\n"
-        + user_text
-    )
-
+def call_ollama(
+        system_prompt,
+        user_prompt,
+        schema
+):
     payload = {
+
         "model": OLLAMA_MODEL,
 
-        "system": COMMAND_SYSTEM_PROMPT,
+        "prompt": user_prompt,
 
-        "prompt": prompt,
+        "system": system_prompt,
 
         "stream": False,
 
-        "keep_alive": "1h",
-
-        "think": False,
-
-        "format": COMMAND_SCHEMA,
+        "format": schema,
 
         "options": {
-            "temperature": 0.2,
-            "num_predict": 180,
-            "num_ctx": 4096
+            "temperature": 0.1
         }
     }
 
@@ -387,40 +337,535 @@ def interpret(user_text, conversation_history=None, game_context=None):
         response = requests.post(
             OLLAMA_URL,
             json=payload,
-            timeout=240
+            timeout=REQUEST_TIMEOUT
         )
 
         response.raise_for_status()
 
         data = response.json()
 
-        raw = data.get("response", "").strip()
+    except requests.exceptions.Timeout:
 
-        print("\n[OLLAMA RAW]")
-        print(raw)
-
-        if not raw:
-            return None
-
-        command = json.loads(raw)
-
-        print("\n[OLLAMA JSON]")
-        print(json.dumps(
-            command,
-            ensure_ascii=False,
-            indent=2
-        ))
-
-        return command
-
-    except requests.RequestException as e:
-
-        print("[OLLAMA ERROR]", e)
+        print(
+            "[OLLAMA ERROR] "
+            "A kérés időtúllépés miatt sikertelen."
+        )
 
         return None
+
+    except requests.exceptions.ConnectionError:
+
+        print(
+            "[OLLAMA ERROR] "
+            "Nem sikerült kapcsolódni az Ollamához."
+        )
+
+        return None
+
+    except requests.exceptions.RequestException as e:
+
+        print(
+            "[OLLAMA ERROR]",
+            e
+        )
+
+        return None
+
+    except ValueError:
+
+        print(
+            "[OLLAMA ERROR] "
+            "Érvénytelen JSON válasz az Ollamától."
+        )
+
+        return None
+
+    raw_response = data.get(
+        "response",
+        ""
+    )
+
+    if not raw_response:
+        print(
+            "[OLLAMA ERROR] "
+            "Üres válasz érkezett."
+        )
+
+        return None
+
+    print(
+        "\n[OLLAMA RAW]"
+    )
+
+    print(
+        raw_response
+    )
+
+    try:
+
+        parsed = json.loads(
+            raw_response
+        )
 
     except json.JSONDecodeError as e:
 
-        print("[OLLAMA JSON ERROR]", e)
+        print(
+            "[OLLAMA JSON ERROR]",
+            e
+        )
 
         return None
+
+    print(
+        "\n[OLLAMA JSON]"
+    )
+
+    print(
+        json.dumps(
+            parsed,
+            ensure_ascii=False,
+            indent=2
+        )
+    )
+
+    return parsed
+
+
+# =========================================================
+# CHAT HISTORY
+# =========================================================
+
+def add_conversation_turn(
+        user_text,
+        assistant_text
+):
+    conversation_history.append({
+
+        "role": "user",
+
+        "content": user_text
+    })
+
+    conversation_history.append({
+
+        "role": "assistant",
+
+        "content": assistant_text
+    })
+
+    if len(
+            conversation_history
+    ) > MAX_HISTORY_MESSAGES:
+        del conversation_history[
+            :-MAX_HISTORY_MESSAGES
+        ]
+
+
+# =========================================================
+# HISTORY FORMÁZÁSA
+# =========================================================
+
+def format_conversation_history():
+    if not conversation_history:
+        return (
+            "Nincs korábbi beszélgetési előzmény."
+        )
+
+    lines = []
+
+    for message in conversation_history:
+
+        role = message.get(
+            "role",
+            ""
+        )
+
+        content = message.get(
+            "content",
+            ""
+        )
+
+        if role == "user":
+
+            lines.append(
+                f"Felhasználó: {content}"
+            )
+
+        elif role == "assistant":
+
+            lines.append(
+                f"Aleksza: {content}"
+            )
+
+    return "\n".join(
+        lines
+    )
+
+
+# =========================================================
+# ELSŐ PROMPT ÖSSZEÁLLÍTÁSA
+# =========================================================
+
+def build_interpretation_prompt(
+        user_text
+):
+    history = (
+        format_conversation_history()
+    )
+
+    prompt = f"""
+Korábbi beszélgetés:
+
+{history}
+
+Mostani felhasználói üzenet:
+
+{user_text}
+
+Osztályozd a felhasználó kérését a megadott szabályok szerint.
+
+Különösen figyelj arra, hogy:
+
+- időjárási kérdés esetén weather actiont használj
+- Wikipédia-szerű tényszerű kérdés esetén wiki_search actiont használj
+- normál beszélgetés esetén chat actiont használj
+
+Wikipédia-keresésnél a response mezőbe csak a keresendő témát írd.
+"""
+
+    return prompt
+
+
+# =========================================================
+# WIKIPÉDIA
+# =========================================================
+
+def perform_wiki_search(
+        user_text,
+        search_query
+):
+    print(
+        "\n[WIKI QUERY]",
+        search_query
+    )
+
+    if not search_query:
+        return {
+
+            "action": "chat",
+
+            "duration_minutes": None,
+
+            "game": None,
+
+            "location": None,
+
+            "response": (
+                "Nem sikerült meghatároznom, "
+                "miről keressek információt."
+            ),
+
+            "game_data": None
+        }
+
+    final_response = get_wiki_answer(
+        search_query
+    )
+
+    if not final_response:
+        final_response = (
+            "Sajnos most nem sikerült "
+            "információt találnom."
+        )
+    # -----------------------------------------------------
+    # WIKI KÉRÉS + WIKI VÁLASZ A CHAT HISTORYBA
+    # -----------------------------------------------------
+
+    add_conversation_turn(
+        user_text,
+        final_response
+    )
+    return {
+
+        "action": "chat",
+
+        "duration_minutes": None,
+
+        "game": None,
+
+        "location": None,
+
+        "response": final_response.strip(),
+
+        "game_data": None
+    }
+
+
+# =========================================================
+# WEATHER
+# =========================================================
+
+def perform_weather(
+        user_text,
+        location
+):
+    print(
+        "\n[WEATHER LOCATION]",
+        location
+    )
+
+    if not location:
+        return {
+
+            "action": "chat",
+
+            "duration_minutes": None,
+
+            "game": None,
+
+            "location": None,
+
+            "response": (
+                "Nem tudom, melyik település "
+                "időjárására vagy kíváncsi."
+            ),
+
+            "game_data": None
+        }
+
+    weather = get_current_weather(
+        location
+    )
+
+    if not weather:
+        return {
+
+            "action": "chat",
+
+            "duration_minutes": None,
+
+            "game": None,
+
+            "location": location,
+
+            "response": (
+                f"Nem sikerült lekérnem "
+                f"{location} aktuális időjárását."
+            ),
+
+            "game_data": None
+        }
+
+    print(
+        "\n[WEATHER DATA]"
+    )
+
+    print(
+        weather
+    )
+
+    final_response = format_weather_response(
+        weather
+    )
+
+    print(
+        "\n[WEATHER RESPONSE]"
+    )
+
+    print(
+        final_response
+    )
+
+    return {
+
+        "action": "chat",
+
+        "duration_minutes": None,
+
+        "game": None,
+
+        "location": weather.get(
+            "location",
+            location
+        ),
+
+        "response": final_response,
+
+        "game_data": None
+    }
+
+
+# =========================================================
+# EREDMÉNY NORMALIZÁLÁSA
+# =========================================================
+
+def normalize_result(
+        result
+):
+    if not result:
+        return None
+
+    action = result.get(
+        "action"
+    )
+
+    if action not in [
+
+        "chat",
+        "set_timer",
+        "stop_timer",
+        "play",
+        "get_time",
+        "wiki_search",
+        "weather",
+        "game_start",
+        "game_turn",
+        "game_end"
+    ]:
+        print(
+            "[INTERPRETER ERROR] "
+            "Ismeretlen action:",
+            action
+        )
+
+        return None
+
+    return {
+
+        "action": action,
+
+        "duration_minutes": result.get(
+            "duration_minutes"
+        ),
+
+        "game": result.get(
+            "game"
+        ),
+
+        "location": result.get(
+            "location"
+        ),
+
+        "response": result.get(
+            "response"
+        ),
+
+        "game_data": result.get(
+            "game_data"
+        )
+    }
+
+
+# =========================================================
+# FŐ INTERPRETER
+# =========================================================
+
+def interpret(
+        user_text
+):
+    if not user_text:
+        return None
+
+    user_text = user_text.strip()
+
+    if not user_text:
+        return None
+
+    print(
+        "\n[INTERPRETER]"
+    )
+
+    print(
+        "User:",
+        user_text
+    )
+
+    prompt = build_interpretation_prompt(
+        user_text
+    )
+
+    result = call_ollama(
+        SYSTEM_PROMPT,
+        prompt,
+        ACTION_SCHEMA
+    )
+
+    result = normalize_result(
+        result
+    )
+
+    if not result:
+        return None
+
+    action = result.get(
+        "action"
+    )
+
+    print(
+        "\n[ACTION]",
+        action
+    )
+
+    # -----------------------------------------------------
+    # WEATHER
+    # -----------------------------------------------------
+
+    if action == "weather":
+        return perform_weather(
+            user_text,
+            result.get(
+                "location"
+            )
+        )
+
+    # -----------------------------------------------------
+    # WIKIPÉDIA
+    # -----------------------------------------------------
+
+    if action == "wiki_search":
+        search_query = result.get(
+            "response"
+        )
+
+        return perform_wiki_search(
+            user_text,
+            search_query
+        )
+
+    # -----------------------------------------------------
+    # NORMÁL CHAT
+    # -----------------------------------------------------
+
+    if action == "chat":
+
+        response = result.get(
+            "response",
+            ""
+        )
+
+        if response:
+            add_conversation_turn(
+                user_text,
+                response
+            )
+
+        return result
+
+    # -----------------------------------------------------
+    # JÁTÉK
+    # -----------------------------------------------------
+
+    if action == "game_start":
+        return result
+
+    if action == "game_turn":
+        return result
+
+    if action == "game_end":
+        return result
+
+    # -----------------------------------------------------
+    # EGYÉB AKCIÓK
+    # -----------------------------------------------------
+
+    return result
