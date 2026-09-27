@@ -108,7 +108,10 @@ with sd.InputStream(
                 try:
                     voice_recognation.voice_process()
                 except:
-                    print("Voice Processing Error")
+                    import traceback
+
+                    print("Voice Processing Error:", type(e).__name__, e)
+                    traceback.print_exc()
 
                 print("=" * 50)
                 print()
