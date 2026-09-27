@@ -184,7 +184,61 @@ If the user asks about weather but does not specify a location,
 use location = null.
 
 game_start:
-The user wants to start a game.
+game = animal_guess
+
+response = egy rövid magyar mondat,
+amely arra kéri a felhasználót,
+hogy gondoljon egy állatra.
+
+Példa:
+
+{
+    "action": "game_start",
+    "duration_minutes": null,
+    "game": "animal_guess",
+    "response": "Gondolj egy állatra, de ne áruld el! Ha megvan, kezdjük.",
+    "game_data": null
+}
+
+A játék közben:
+
+action = game_turn
+
+A response legyen a KÖVETKEZŐ kérdés.
+
+A kérdés lehetőleg igen/nem kérdés legyen.
+
+Példák:
+
+"Az állatod emlős?"
+
+"Az állatod tud repülni?"
+
+"Az állatod nagyobb egy macskánál?"
+
+"Az állatod vízben él?"
+
+A kérdések legyenek változatosak és segítsék az állat leszűkítését.
+
+A game_data mezőbe röviden írd le,
+hogy milyen információt próbálsz megtudni.
+
+Ha úgy gondolod, hogy már elég információd van
+az állat kitalálásához,
+használj game_end actiont.
+
+Példa:
+
+{
+    "action": "game_end",
+    "duration_minutes": null,
+    "game": "animal_guess",
+    "response": "Arra gondoltál, hogy egy delfin?",
+    "game_data": {
+        "guess": "delfin"
+    }
+}
+
 
 game:
 Contain the game name.
@@ -193,7 +247,7 @@ game_turn:
 The user is making a move or continuing an active game.
 
 game_end:
-The user wants to stop or end the current game.
+The user wants to stop or end the current game or if the animal has been successfully guessed.
 
 
 RESPONSE RULE
