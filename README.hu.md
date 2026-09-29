@@ -17,6 +17,9 @@ A projekt Windows környezetre készült, és a Python környezet valamint a fü
 * Játékok támogatása
 * GPU-gyorsítás, ahol az adott hardver és a használt könyvtárak támogatják
 
+A src_slow_pc mappában található verzió, egy lebutított alap funkcionalítást 
+támogató egyszerű implementáció ami későbbiekben RPI-re portolás miatt kezdtem kialakítani.
+
 ---
 
 # Követelmények
@@ -142,6 +145,11 @@ Az asszisztens indítása:
 ```powershell
 uv run python src\assistant.py
 ```
+Lassabb gépen:
+```powershell
+uv run python src_slow_pc\assistant.py
+```
+
 
 Az asszisztens jelenlegi ébresztőszava:
 
@@ -178,6 +186,12 @@ HungarianAlexaAssistant/
 │   ├── assistant.py
 │   ├── voice_recognation.py
 │   ├── command_definition.py
+│   └── ...
+│
+├── src_slow_pc/
+│   ├── assistant.py
+│   ├── command_definition.py
+│   ├── command_interpreter.py
 │   └── ...
 │
 ├── models/
@@ -265,7 +279,10 @@ Végül:
 ```powershell
 uv run python src\assistant.py
 ```
-
+vagy ezt kell indítani, ha lassabb gépen szeretnéd kipróbálni:
+```powershell
+uv run python src_slow_pc\assistant.py
+```
 ---
 
 # Modellfájlok és nagy bináris fájlok

@@ -17,6 +17,9 @@ The project is designed to run locally on Windows and uses [`uv`](https://docs.a
 * Game interaction support
 * GPU acceleration where supported
 
+The version found in the `src_slow_pc` folder is a simple implementation supporting only basic,
+stripped-down functionality. I began developing it with the intention of later porting it to the Raspberry Pi.
+
 ---
 
 # Requirements
@@ -64,6 +67,12 @@ To run the application:
 ```powershell
 uv run python src\assistant.py
 ```
+
+Slower PC:
+```powershell
+uv run python src_slow_pc\assistant.py
+```
+
 
 ---
 
@@ -139,6 +148,12 @@ Start the assistant with:
 uv run python src\assistant.py
 ```
 
+or on a slower computer:
+
+```powershell
+uv run python src_slow_pc\assistant.py
+```
+
 The assistant listens for the wake word:
 
 ```text
@@ -174,6 +189,12 @@ HungarianAlexaAssistant/
 │   ├── assistant.py
 │   ├── voice_recognation.py
 │   ├── command_definition.py
+│   └── ...
+│
+├── src_slow_pc/
+│   ├── assistant.py
+│   ├── command_definition.py
+│   ├── command_interpreter.py
 │   └── ...
 │
 ├── models/
