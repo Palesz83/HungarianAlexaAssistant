@@ -35,29 +35,44 @@ sd.play(wav, blocking=True)
 
 conversation_history = []
 
+def number_to_word(input_string):
+    if not input_string:
+        return ""
 
-def szamokat_beture_magyarul(szoveg):
-    # Reguláris kifejezés, ami megkeresi a számjegyeket a szövegben
-    pattern = r'\d+'
+    # Új regex: keresünk számjegyeket, amik után opcionálisan követhet egy
+    # pont vagy vessző, és újabb számjegyek.
+    # \d+ : egy vagy több számjegy
+    # (?:[.,]\d+)? : egy nem-csoportos csoport, ami opcionális (?),
+    #                és tartalmaz egy pontot/vesszőt [.,] és számjegyeket \d+
+    pattern = r"\d+(?:[.,]\d+)?"
 
     def replacer(match):
-        szam_string = match.group(0)
-        szam_int = int(szam_string)
+        full_number = match.group(0)
 
-        # Ha a szám 49 és egy évszám része (pl. 1848-49), a TTS-nek jobb "negyvenkilenc"-ként mondani,
-        # de a num2words alapvetően tökéletesen leírja: "ezerkilencszáz..." vagy "negyvenkilenc"
-        return num2words(szam_int, lang='hu')
+        # Megnézzük, van-e a számban tizedes elválasztó
+        if '.' in full_number or ',' in full_number:
+            # Szétválasztjuk a tizedes részt az elválasztótól (pont vagy vessző)
+            # re.split használata, hogy mindkét karaktert kezelje
+            parts = reerca_split_parts(full_number)
 
-    # Kicseréljük az összes talált számot a betűs megfelelőjére
-    eredmeny = re.sub(pattern, replacer, szoveg)
+            whole_part = int(parts[0])
+            fractional_part = int(parts[1])
 
-    # Kisebb szépítés: a kötőjelek körüli terek tisztítása, ha szükséges a TTS-nek
-    # Pl. "1848-49-ben" -> "ezernyolcszáznegyvennyolc-negyvenkilenc-ben"
-    return eredmeny
+            return f"{num2words(whole_part, lang='hu')} egész {num2words(fractional_part, lang='hu')}"
+        else:
+            # Ha sima egész szám
+            return num2words(int(full_number), lang="hu")
 
+    # Segédfüggvény a részek szétválasztására
+    def reerca_split_parts(s):
+        # A pontot vagy vesszőt replaced-eljük, hogy könnyebb legyen splitelni
+        return re.split(r'[.,]', s)
 
-# Itt lehet definiálni tool hivásokra vonatkozó kulcs szavakat!
-
+    return re.sub(
+        pattern,
+        replacer,
+        input_string
+    )
 
 
 def ask_ollama(user_text):
@@ -191,10 +206,10 @@ def voice_process():
 
         if tool_response is not None:
 
-            converted_str = szamokat_beture_magyarul(tool_response)
+            converted_str = number_to_word(tool_response)
         else:
 
-            converted_str =szamokat_beture_magyarul(response)
+            converted_str =number_to_word(response)
 
         speech_something(converted_str)
 

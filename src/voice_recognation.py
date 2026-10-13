@@ -62,28 +62,43 @@ sd.play(
 # SZÁM -> MAGYAR SZÖVEG
 # =========================================================
 
-def szamokat_beture_magyarul(szoveg):
-
-    if not szoveg:
+def number_to_word(input_string):
+    if not input_string:
         return ""
 
-    pattern = r"\d+"
+    # Új regex: keresünk számjegyeket, amik után opcionálisan követhet egy
+    # pont vagy vessző, és újabb számjegyek.
+    # \d+ : egy vagy több számjegy
+    # (?:[.,]\d+)? : egy nem-csoportos csoport, ami opcionális (?),
+    #                és tartalmaz egy pontot/vesszőt [.,] és számjegyeket \d+
+    pattern = r"\d+(?:[.,]\d+)?"
 
     def replacer(match):
+        full_number = match.group(0)
 
-        number = int(
-            match.group(0)
-        )
+        # Megnézzük, van-e a számban tizedes elválasztó
+        if '.' in full_number or ',' in full_number:
+            # Szétválasztjuk a tizedes részt az elválasztótól (pont vagy vessző)
+            # re.split használata, hogy mindkét karaktert kezelje
+            parts = reerca_split_parts(full_number)
 
-        return num2words(
-            number,
-            lang="hu"
-        )
+            whole_part = int(parts[0])
+            fractional_part = int(parts[1])
+
+            return f"{num2words(whole_part, lang='hu')} egész {num2words(fractional_part, lang='hu')}"
+        else:
+            # Ha sima egész szám
+            return num2words(int(full_number), lang="hu")
+
+    # Segédfüggvény a részek szétválasztására
+    def reerca_split_parts(s):
+        # A pontot vagy vesszőt replaced-eljük, hogy könnyebb legyen splitelni
+        return re.split(r'[.,]', s)
 
     return re.sub(
         pattern,
         replacer,
-        szoveg
+        input_string
     )
 
 
@@ -99,7 +114,7 @@ def speech_something(
         return
 
     converted = (
-        szamokat_beture_magyarul(
+        number_to_word(
             string_to_say
         )
     )
