@@ -388,13 +388,17 @@ def voice_process():
         # WHISPER
         # =================================================
 
-        input_string = r.recognize_whisper(
+        input_string_old = r.recognize_whisper(
             audio,
             language="hu",
             model="small"
         )
+        input_string_old = input_string_old.strip()
 
-        input_string = input_string.strip()
+        txt = re.sub(r'\?', '', input_string_old)  # A kérdőjejet keresi és törli
+        txt = re.sub(r'!', '', txt)  # A felütót törli
+        txt = re.sub(r'\.', '', txt)  # A pontot törli (a \ must a regex miatt)
+        input_string = txt
 
         print(
             "\nYou said:",
@@ -406,11 +410,11 @@ def voice_process():
             return
 
         # =================================================
-        # OLLAMA
+        # HELYI LLM
         # =================================================
 
         print(
-            "\nSending to Ollama..."
+            "\nProcessing with local LLM..."
         )
 
         # Az új interpret() csak user_text-et vár.

@@ -1,16 +1,20 @@
+import argparse
+import json
+import signal
 import sys
 import threading
+from pathlib import Path
 
 import sherpa_onnx
 import sounddevice as sd
 import soundfile as sf
 
-from PySide6.QtCore import QThread, Signal
-from PySide6.QtWidgets import QApplication
+from PySide6.QtCore import (
+    QCoreApplication, QProcess, QProcessEnvironment, QThread, QTimer, Signal,
+)
 
-from alexa_face_3d import AlekszaFace
 import voice_recognation
-
+#from local_llm import generate, get_finetuned_model, make_prompt
 
 MODEL_DIR = (
     "../models/wakeword/"
@@ -141,23 +145,39 @@ class VoiceWorker(QThread):
 
 class Assistant:
 
-    def __init__(self):
-        self.app = QApplication.instance()
+    def __init__(self, show_face=True):
+        self.app = QCoreApplication.instance()
 
         if self.app is None:
-            self.app = QApplication(sys.argv)
+            self.app = QCoreApplication(sys.argv)
 
-        self.face = AlekszaFace(monitor_audio=False)
+        self.face = None
+        self._shutting_down = False
+        self._face_ready = False
+        self.face_startup_timer = QTimer()
+        self.face_startup_timer.setSingleShot(True)
+        self.face_startup_timer.timeout.connect(self.handle_face_startup_timeout)
         self.worker = VoiceWorker()
-        self.worker.audio_monitoring_changed.connect(
-            self.face.set_audio_monitoring
-        )
-        # self.worker = VoiceWorker()
-
-        # A háttérszál jelzései a grafikus felületnek.
-        self.worker.thinking_changed.connect(
-            self.face.set_thinking
-        )
+        if show_face:
+            self.face = QProcess()
+            environment = QProcessEnvironment.systemEnvironment()
+            environment.insert("PYTHONIOENCODING", "utf-8")
+            self.face.setProcessEnvironment(environment)
+            self.face.setProgram(sys.executable)
+            self.face.setArguments([
+                "-u", str(Path(__file__).resolve().with_name("face_process.py"))
+            ])
+            self.face.readyReadStandardOutput.connect(self.read_face_output)
+            self.face.readyReadStandardError.connect(self.read_face_errors)
+            self.face.errorOccurred.connect(self.handle_face_error)
+            self.face.finished.connect(self.handle_face_finished)
+            self.worker.audio_monitoring_changed.connect(
+                lambda enabled: self.send_face_command("audio_monitoring", enabled)
+            )
+            self.worker.thinking_changed.connect(
+                lambda enabled: self.send_face_command("thinking", enabled)
+            )
+        self.worker.finished.connect(self.app.quit)
 
         self.worker.error_occurred.connect(
             self.handle_error
@@ -177,14 +197,88 @@ class Assistant:
     def handle_error(self, message):
         print(f"[Assistant hiba] {message}")
 
-    def start(self):
-        self.face.show()
-        self.worker.start()
+    def send_face_command(self, command, enabled):
+        if self._shutting_down:
+            return
+        message = json.dumps({"command": command, "enabled": enabled}) + "\n"
+        if self.face.write(message.encode("utf-8")) == -1:
+            self.handle_error("Nem sikerült állapotot küldeni a 3D fejnek.")
+            self.app.exit(1)
 
-        return self.app.exec()
+    def read_face_output(self):
+        while self.face.canReadLine():
+            line = bytes(self.face.readLine()).decode("utf-8").strip()
+            if line == '[FACE IPC] {"event": "ready"}':
+                if not self._face_ready and not self._shutting_down:
+                    self._face_ready = True
+                    self.face_startup_timer.stop()
+                    print("[STARTUP] 3D fej külön folyamatban készen áll.")
+                    self.worker.start()
+            elif line:
+                print(line)
+
+    def read_face_errors(self):
+        output = bytes(self.face.readAllStandardError()).decode("utf-8")
+        if output:
+            print(output, file=sys.stderr, end="")
+
+    def handle_face_error(self, error):
+        if not self._shutting_down:
+            self.handle_error(f"3D fej folyamathiba: {self.face.errorString()}")
+            self.app.exit(1)
+
+    def handle_face_startup_timeout(self):
+        self.handle_error("A 3D fej nem jelezte időben, hogy készen áll.")
+        self.app.exit(1)
+
+    def handle_face_finished(self, exit_code, exit_status):
+        if not self._shutting_down:
+            failed = exit_code != 0 or exit_status == QProcess.ExitStatus.CrashExit
+            if failed:
+                self.handle_error(f"A 3D fej folyamata leállt: {exit_code}")
+            self.app.exit(1 if failed else 0)
+
+    def start(self):
+        if self.face is not None:
+            self.face.start()
+            if not self.face.waitForStarted(10000):
+                self.shutdown()
+                return 1
+            self.face_startup_timer.start(30000)
+        else:
+            print("[STARTUP] 3D fej kikapcsolva.")
+            self.worker.start()
+
+        print("[STARTUP] Kilépés: Ctrl+C vagy a 3D ablak bezárása.")
+        # Let Python handle Ctrl+C while the Qt event loop is idle.
+        timer = QTimer()
+        timer.timeout.connect(lambda: None)
+        timer.start(100)
+        previous_handler = signal.signal(
+            signal.SIGINT, lambda signum, frame: self.app.quit()
+        )
+        try:
+            return self.app.exec()
+        finally:
+            timer.stop()
+            signal.signal(signal.SIGINT, previous_handler)
+            self.shutdown()
 
     def shutdown(self):
+        if self._shutting_down:
+            return
+        self._shutting_down = True
+        self.face_startup_timer.stop()
         self.worker.stop()
+
+        if self.face is not None and self.face.state() != QProcess.ProcessState.NotRunning:
+            self.face.closeWriteChannel()
+            if not self.face.waitForFinished(3000):
+                print("[Assistant] A 3D fej leállítása időtúllépés miatt.")
+                self.face.terminate()
+                if not self.face.waitForFinished(1000):
+                    self.face.kill()
+                    self.face.waitForFinished()
 
         # Megvárjuk a háttérszál befejezését.
         if self.worker.isRunning():
@@ -196,5 +290,12 @@ class Assistant:
 # ============================================================
 
 if __name__ == "__main__":
-    assistant = Assistant()
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--no-face",
+        action="store_true",
+        help="Run without the animated 3D face.",
+    )
+    args = parser.parse_args()
+    assistant = Assistant(show_face=not args.no_face)
     sys.exit(assistant.start())
