@@ -4,4 +4,5 @@ saved_model/
 .venv*/
 .vscode/
 .idea/
+models*/
 __pycache__/
